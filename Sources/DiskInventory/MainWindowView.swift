@@ -28,18 +28,30 @@ struct MainWindowView: View {
         .background(WindowKeyObserver(documentID: document.id, title: document.title))
     }
 
+    /// The files view, or the cleanup suggestions in its place so they get the full height
+    /// while the treemap beside them shows what is ticked.
+    @ViewBuilder private var files: some View {
+        if document.showCleanup {
+            CleanupView(document: document)
+                .frame(minWidth: 420, idealWidth: 600, minHeight: 100)
+        } else {
+            FileOutlineView(document: document, treeVersion: document.treeVersion, selection: document.selection,
+                            showPackageContents: document.showPackageContents, sizeMode: document.sizeMode,
+                            smallFont: smallFilesFont)
+                .frame(minWidth: 150, minHeight: 100)
+        }
+    }
+
     @ViewBuilder private var split: some View {
-        let files = FileOutlineView(document: document, treeVersion: document.treeVersion, selection: document.selection,
-                                    showPackageContents: document.showPackageContents, sizeMode: document.sizeMode,
-                                    smallFont: smallFilesFont)
-            .frame(minWidth: 150, minHeight: 100)
         let treemap = TreemapView(
             document: document,
             inputs: TreemapInputs(treeVersion: document.treeVersion, colorsVersion: document.colorsVersion,
                                   displayRoot: document.displayRoot?.id, sizeMode: document.sizeMode,
                                   showPackageContents: document.showPackageContents,
                                   showFreeSpace: document.showFreeSpace, showOtherSpace: document.showOtherSpace),
-            selection: document.selection, transition: document.lastZoomTransition)
+            selection: document.selection,
+            highlighted: document.showCleanup ? document.checkedCandidates.map(\.node.id) : [],
+            transition: document.lastZoomTransition)
             .frame(minWidth: 150, minHeight: 100)
 
         if document.splitHorizontally {
@@ -113,6 +125,12 @@ private struct MainToolbar: CustomizableToolbarContent {
                 .disabled(document.selection?.parent == nil)
         }
         ToolbarItem(id: "flexible") { Spacer() }
+        ToolbarItem(id: "Cleanup") {
+            Toggle(isOn: Binding(get: { document.showCleanup }, set: { document.showCleanup = $0 })) {
+                Label("Cleanup", systemImage: "bubbles.and.sparkles")
+            }
+            .help(document.showCleanup ? "Hide Cleanup Suggestions" : "Show Cleanup Suggestions")
+        }
         ToolbarItem(id: "ToggleKindsStatisticDrawer") {
             Toggle(isOn: Binding(get: { document.showKindStatistics }, set: { document.showKindStatistics = $0 })) {
                 Label("File Kind Statistics", systemImage: "chart.bar.doc.horizontal")

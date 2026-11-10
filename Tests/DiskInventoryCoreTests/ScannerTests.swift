@@ -73,6 +73,17 @@ import Testing
         #expect(tree.path(to: png)?.count == 4)
     }
 
+    @Test func recordsModificationDates() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let past = Date(timeIntervalSince1970: 1_600_000_000)
+        try FileManager.default.setAttributes([.modificationDate: past], ofItemAtPath: root.appending(path: "a/small.txt").path)
+        let tree = try await scan()
+        let small = try #require(tree.descendant(atNames: ["a", "small.txt"]))
+        #expect(small.modificationDate == past)
+        let a = try #require(tree.children.first { $0.name == "a" })
+        #expect(try #require(a.modificationDate) > past, "a folder carries its newest file's date")
+    }
+
     @Test func missingRootThrows() async {
         await #expect(throws: ScanError.self) {
             try await Scanner().scan(URL(filePath: "/nonexistent-\(UUID().uuidString)"))

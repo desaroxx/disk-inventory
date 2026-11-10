@@ -18,6 +18,8 @@ struct TreemapView: NSViewRepresentable {
     let document: DocumentModel
     let inputs: TreemapInputs
     let selection: FileNode?
+    /// Items drawn with a light overlay, e.g. ticked cleanup suggestions.
+    let highlighted: [ObjectIdentifier]
     let transition: DocumentModel.ZoomTransition?
 
     func makeNSView(context: Context) -> TreemapNSView {
@@ -25,7 +27,7 @@ struct TreemapView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: TreemapNSView, context: Context) {
-        view.update(inputs: inputs, selection: selection, transition: transition)
+        view.update(inputs: inputs, selection: selection, highlighted: highlighted, transition: transition)
     }
 }
 
@@ -33,6 +35,7 @@ final class TreemapNSView: NSView {
     private let document: DocumentModel
     private var inputs: TreemapInputs?
     private var selection: FileNode?
+    private var highlighted: [ObjectIdentifier] = []
     private var lastTransition: DocumentModel.ZoomTransition?
 
     private var layoutResult = TreemapLayoutResult.empty
@@ -61,9 +64,11 @@ final class TreemapNSView: NSView {
         if zoomLayer.superlayer == nil { layer?.addSublayer(zoomLayer) }
     }
 
-    func update(inputs: TreemapInputs, selection: FileNode?, transition: DocumentModel.ZoomTransition?) {
-        if selection !== self.selection {
+    func update(inputs: TreemapInputs, selection: FileNode?, highlighted: [ObjectIdentifier],
+                transition: DocumentModel.ZoomTransition?) {
+        if selection !== self.selection || highlighted != self.highlighted {
             self.selection = selection
+            self.highlighted = highlighted
             needsDisplay = true
         }
         guard inputs != self.inputs else { return }
@@ -156,13 +161,23 @@ final class TreemapNSView: NSView {
             NSImage(cgImage: image, size: renderedSize)
                 .draw(in: bounds, from: .zero, operation: .copy, fraction: 1, respectFlipped: true, hints: nil)
         }
+        let scale = CGSize(width: bounds.width / max(renderedSize.width, 1),
+                           height: bounds.height / max(renderedSize.height, 1))
+        func scaled(_ rect: CGRect) -> CGRect {
+            CGRect(x: rect.minX * scale.width, y: rect.minY * scale.height,
+                   width: rect.width * scale.width, height: rect.height * scale.height)
+        }
+        // Items too small to get a rect of their own are not highlighted.
+        for id in highlighted {
+            guard let rect = layoutResult.rects[id] else { continue }
+            NSColor.white.withAlphaComponent(0.45).setFill()
+            scaled(rect).fill(using: .sourceOver)
+            NSColor.white.setStroke()
+            NSBezierPath(rect: scaled(rect).insetBy(dx: 0.5, dy: 0.5)).stroke()
+        }
         if let rect = selectionRect() {
-            let scale = CGSize(width: bounds.width / max(renderedSize.width, 1),
-                               height: bounds.height / max(renderedSize.height, 1))
-            let scaled = CGRect(x: rect.minX * scale.width, y: rect.minY * scale.height,
-                                width: rect.width * scale.width, height: rect.height * scale.height)
             NSColor.yellow.setStroke()
-            let path = NSBezierPath(rect: scaled.insetBy(dx: 1, dy: 1))
+            let path = NSBezierPath(rect: scaled(rect).insetBy(dx: 1, dy: 1))
             path.lineWidth = 2
             path.stroke()
         }

@@ -90,7 +90,7 @@ public struct Scanner: Sendable {
             leafBytes += physical
             let (kind, _) = classifier.classify(name: entry.name, type: entry.type, isExecutable: entry.isExecutable)
             leaves.append(FileNode(name: entry.name, type: entry.type, kindName: kind,
-                                   physicalSize: physical, logicalSize: logical))
+                                   physicalSize: physical, logicalSize: logical, modificationDate: entry.modificationDate))
         }
         progress.record(files: leaves.count, bytes: leafBytes)
 
@@ -125,6 +125,7 @@ public struct Scanner: Sendable {
         var logicalSize: Int64
         var allocatedSize: Int64
         var isMountPoint: Bool
+        var modificationDate: Date?
     }
 
     static func readEntries(path: String) throws -> [Entry] {
@@ -136,7 +137,7 @@ public struct Scanner: Sendable {
         request.bitmapcount = u_short(ATTR_BIT_MAP_COUNT)
         request.commonattr = bits(ATTR_CMN_RETURNED_ATTRS)
             | bits(ATTR_CMN_NAME) | bits(ATTR_CMN_ERROR) | bits(ATTR_CMN_OBJTYPE)
-            | bits(ATTR_CMN_ACCESSMASK) | bits(ATTR_CMN_FILEID)
+            | bits(ATTR_CMN_MODTIME) | bits(ATTR_CMN_ACCESSMASK) | bits(ATTR_CMN_FILEID)
         request.dirattr = bits(ATTR_DIR_MOUNTSTATUS)
         request.fileattr = bits(ATTR_FILE_LINKCOUNT) | bits(ATTR_FILE_TOTALSIZE) | bits(ATTR_FILE_ALLOCSIZE)
 
@@ -186,6 +187,7 @@ public struct Scanner: Sendable {
         }
 
         let objType = has(returned.commonattr, ATTR_CMN_OBJTYPE) ? read(fsobj_type_t.self) : 0
+        let modified = has(returned.commonattr, ATTR_CMN_MODTIME) ? read(timespec.self) : nil
         let mode = has(returned.commonattr, ATTR_CMN_ACCESSMASK) ? read(UInt32.self) : 0
         let fileID = has(returned.commonattr, ATTR_CMN_FILEID) ? read(UInt64.self) : 0
         let mountStatus = has(returned.dirattr, ATTR_DIR_MOUNTSTATUS) ? read(UInt32.self) : 0
@@ -202,7 +204,8 @@ public struct Scanner: Sendable {
 
         return Entry(name: name, type: type, fileID: fileID, isExecutable: mode & 0o111 != 0,
                      linkCount: linkCount, logicalSize: logical, allocatedSize: allocated,
-                     isMountPoint: mountStatus & UInt32(DIR_MNTSTATUS_MNTPOINT) != 0)
+                     isMountPoint: mountStatus & UInt32(DIR_MNTSTATUS_MNTPOINT) != 0,
+                     modificationDate: modified.map { Date(timeIntervalSince1970: TimeInterval($0.tv_sec) + TimeInterval($0.tv_nsec) / 1e9) })
     }
 }
 

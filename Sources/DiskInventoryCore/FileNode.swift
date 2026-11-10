@@ -28,6 +28,8 @@ public final class FileNode: @unchecked Sendable, Identifiable {
     public let logicalSize: Int64
     /// Number of non-directory entries beneath this node (1 for a file).
     public let fileCount: Int
+    /// Content modification time of a file; for a directory, the newest one beneath it.
+    public let modificationDate: Date?
     /// Sorted by physical size, largest first.
     public let children: [FileNode]
     public let special: Special?
@@ -41,7 +43,7 @@ public final class FileNode: @unchecked Sendable, Identifiable {
 
     public init(name: String, type: NodeType, kindName: String = "", isPackage: Bool = false,
                 physicalSize: Int64 = 0, logicalSize: Int64 = 0, children: [FileNode] = [],
-                special: Special? = nil, url: URL? = nil) {
+                special: Special? = nil, url: URL? = nil, modificationDate: Date? = nil) {
         self.name = name
         self.type = type
         self.kindName = kindName
@@ -53,11 +55,13 @@ public final class FileNode: @unchecked Sendable, Identifiable {
             self.physicalSize = physicalSize + children.reduce(0) { $0 + $1.physicalSize }
             self.logicalSize = logicalSize + children.reduce(0) { $0 + $1.logicalSize }
             self.fileCount = children.reduce(0) { $0 + $1.fileCount }
+            self.modificationDate = children.compactMap(\.modificationDate).max()
         } else {
             self.children = []
             self.physicalSize = physicalSize
             self.logicalSize = logicalSize
             self.fileCount = special == nil ? 1 : 0
+            self.modificationDate = modificationDate
         }
         for child in self.children { child.parent = self }
     }
@@ -131,6 +135,6 @@ public final class FileNode: @unchecked Sendable, Identifiable {
 
     func copy(children: [FileNode], url: URL? = nil) -> FileNode {
         FileNode(name: name, type: type, kindName: kindName, isPackage: isPackage,
-                 children: children, special: special, url: url ?? rootURL)
+                 children: children, special: special, url: url ?? rootURL, modificationDate: modificationDate)
     }
 }

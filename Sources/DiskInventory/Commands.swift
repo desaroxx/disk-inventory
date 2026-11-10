@@ -88,6 +88,9 @@ struct AppCommands: Commands {
             toggle(ready?.showSelectionList, show: "Show Selection List", hide: "Hide Selection List") {
                 $0.showSelectionList.toggle()
             }
+            toggle(ready?.showCleanup, show: "Show Cleanup Suggestions", hide: "Hide Cleanup Suggestions") {
+                $0.showCleanup.toggle()
+            }
             Divider()
             Button(state.isInfoPanelVisible ? "Hide Information" : "Show Information") { InfoPanel.toggle() }
                 .keyboardShortcut("i")

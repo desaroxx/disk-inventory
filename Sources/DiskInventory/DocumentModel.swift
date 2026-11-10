@@ -50,7 +50,16 @@ final class DocumentModel: Identifiable {
 
     private(set) var kindStatistics: [KindStatistic] = []
 
+    var showCleanup = false
+    /// What the cleanup rules suggest for the current tree, largest first.
+    private(set) var cleanupCandidates: [CleanupCandidate] = []
+    /// False while the rules run over a new tree.
+    private(set) var cleanupIsCurrent = false
+    /// Paths of the suggestions ticked for trashing.
+    var checkedCleanup: Set<String> = []
+
     @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var cleanupTask: Task<Void, Never>?
     @ObservationIgnored private var logicalOrderCache: [ObjectIdentifier: [FileNode]] = [:]
 
     init(url: URL, colors: KindColorRegistry) {
@@ -103,6 +112,42 @@ final class DocumentModel: Identifiable {
         lastZoomTransition = nil
         treeVersion += 1
         viewOptionsChanged()
+        updateCleanupCandidates()
+    }
+
+    private func updateCleanupCandidates() {
+        cleanupTask?.cancel()
+        guard let root else { return }
+        cleanupIsCurrent = false
+        let rules = CleanupRule.standard(home: NSHomeDirectory())
+        cleanupTask = Task {
+            let found = await Task.detached(priority: .utility) { CleanupRule.candidates(in: root, rules: rules) }.value
+            guard !Task.isCancelled, root === self.root else { return }
+            cleanupCandidates = found
+            cleanupIsCurrent = true
+            checkedCleanup.formIntersection(found.map(\.id))
+        }
+    }
+
+    /// The ticked suggestions.
+    var checkedCandidates: [CleanupCandidate] {
+        cleanupCandidates.filter { checkedCleanup.contains($0.id) }
+    }
+
+    /// Asks, then moves the ticked suggestions to the Trash.
+    func trashCheckedCleanup() {
+        let picked = checkedCandidates
+        guard !picked.isEmpty else { return }
+        let total = picked.reduce(0) { $0 + $1.node.physicalSize }
+        let alert = NSAlert()
+        alert.messageText = picked.count == 1 ? "Move \"\(picked[0].node.name)\" to the Trash?"
+                                              : "Move \(picked.count) items to the Trash?"
+        alert.informativeText = "\(Format.bytes(total)) is freed when you empty the Trash. Until then, Put Back restores them."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        checkedCleanup.subtract(picked.map(\.id))
+        moveToTrash(picked.map(\.node))
     }
 
     private func viewOptionsChanged() {
@@ -248,18 +293,54 @@ final class DocumentModel: Identifiable {
 
     func moveToTrash(_ node: FileNode) {
         guard node.parent != nil, ensureExists(node) else { return }
-        do {
-            try FileManager.default.trashItem(at: node.url, resultingItemURL: nil)
-        } catch {
-            alert("\"\(node.name)\" cannot be moved to the trash.",
+        removeFromTree(trash([node]), select: node.parent)
+    }
+
+    /// Moves several items to the Trash and rebuilds the tree once. Items that are already
+    /// gone are dropped from the tree without a complaint.
+    func moveToTrash(_ nodes: [FileNode]) {
+        let moved = trash(nodes.filter { $0.parent != nil })
+        let keep = selection.flatMap { selected in moved.contains { $0.path(to: selected) != nil } ? nil : selected }
+        removeFromTree(moved, select: keep)
+    }
+
+    /// Returns the nodes that are no longer on disk afterwards.
+    private func trash(_ nodes: [FileNode]) -> [FileNode] {
+        var gone: [FileNode] = []
+        var failed: [String] = []
+        for node in nodes {
+            do {
+                if FileManager.default.fileExists(atPath: node.url.path) {
+                    try FileManager.default.trashItem(at: node.url, resultingItemURL: nil)
+                }
+                gone.append(node)
+            } catch {
+                failed.append(node.name)
+            }
+        }
+        if failed.count == 1 {
+            alert("\"\(failed[0])\" cannot be moved to the trash.",
                   info: "Maybe you do not have sufficient access privileges.")
-            return
+        } else if !failed.isEmpty {
+            alert("\(failed.count) items cannot be moved to the trash.",
+                  info: "Maybe you do not have sufficient access privileges.\n\n" + failed.prefix(10).joined(separator: "\n"))
         }
-        let parent = node.parent
-        if let newRoot = FileNode.replacing(node, with: nil) {
-            selection = parent
-            install(newRoot)
+        return gone
+    }
+
+    private func removeFromTree(_ nodes: [FileNode], select: FileNode?) {
+        guard var newRoot = root, !nodes.isEmpty else { return }
+        // Each replacement re-parents shared subtrees and frees the previous intermediate tree,
+        // so the old nodes' (weak) parent chains are only trustworthy before the first one.
+        let removed = nodes.map(\.namesFromRoot)
+        let selected = select?.namesFromRoot
+        for names in removed {
+            guard let current = newRoot.descendant(atNames: names),
+                  let next = FileNode.replacing(current, with: nil) else { continue }
+            newRoot = next
         }
+        selection = selected.flatMap { newRoot.descendant(atNames: $0) }
+        install(newRoot)
     }
 
     private func ensureExists(_ node: FileNode) -> Bool {

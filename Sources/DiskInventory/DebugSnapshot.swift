@@ -16,7 +16,9 @@ enum DebugSnapshot {
             var document: DocumentModel?
             while document == nil {
                 try? await Task.sleep(for: .milliseconds(250))
-                document = AppState.shared.activeDocument.flatMap { $0.state == .ready && $0.root != nil ? $0 : nil }
+                document = AppState.shared.activeDocument.flatMap {
+                    $0.state == .ready && $0.root != nil && $0.cleanupIsCurrent ? $0 : nil
+                }
             }
             guard let document else { return }
             try? await Task.sleep(for: .seconds(1.5))
@@ -50,6 +52,13 @@ enum DebugSnapshot {
         case "free": document.showFreeSpace.toggle()
         case "other": document.showOtherSpace.toggle()
         case "split": document.splitHorizontally.toggle()
+        case "cleanup": document.showCleanup.toggle()
+        case "tickSafe":
+            document.checkedCleanup = Set(document.cleanupCandidates.filter { $0.rule.risk == .safe }.map(\.id))
+            log("cleanup: \(document.cleanupCandidates.count) suggestions, \(document.checkedCleanup.count) ticked")
+            for candidate in document.cleanupCandidates.prefix(15) {
+                log("  \(candidate.rule.id) \(Format.bytes(candidate.node.physicalSize)) \(candidate.path)")
+            }
         default: log("unknown step \(step)")
         }
     }
