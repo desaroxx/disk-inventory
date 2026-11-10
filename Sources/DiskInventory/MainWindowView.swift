@@ -100,29 +100,32 @@ private struct MainToolbar: CustomizableToolbarContent {
             Button("Zoom Out", systemImage: "minus.magnifyingglass") { document.zoomOut() }
                 .disabled(!document.canZoomOut)
         }
-        ToolbarItem(id: "ShowInfo", showsByDefault: false) {
-            Button("Show Information", systemImage: "info.circle") { InfoPanel.toggle() }
-        }
-        ToolbarItem(id: "ShowPackageContents", showsByDefault: false) {
-            Toggle(isOn: Binding(get: { document.showPackageContents }, set: { document.showPackageContents = $0 })) {
-                Label("Show Package Contents",
-                      systemImage: document.showPackageContents ? "shippingbox.and.arrow.backward" : "shippingbox")
+        // Grouped: older SDKs cap a toolbar builder at ten items.
+        Group {
+            ToolbarItem(id: "ShowInfo", showsByDefault: false) {
+                Button("Show Information", systemImage: "info.circle") { InfoPanel.toggle() }
             }
-        }
-        ToolbarItem(id: "RevealInFinder", showsByDefault: false) {
-            Button("Reveal in Finder", systemImage: "finder") { document.selection.map(document.reveal) }
-                .disabled(document.selection?.special != nil || document.selection == nil)
-        }
-        ToolbarItem(id: "RefreshSelection", showsByDefault: false) {
-            Button("Refresh Selection", systemImage: "arrow.clockwise") { document.selection.map(document.refresh) }
-                .disabled(document.selection == nil)
-        }
-        ToolbarItem(id: "RefreshAll", showsByDefault: false) {
-            Button("Refresh All", systemImage: "arrow.triangle.2.circlepath") { document.refreshAll() }
-        }
-        ToolbarItem(id: "MoveToTrash", showsByDefault: false) {
-            Button("Move to Trash", systemImage: "trash") { document.selection.map(document.moveToTrash) }
-                .disabled(document.selection?.parent == nil)
+            ToolbarItem(id: "ShowPackageContents", showsByDefault: false) {
+                Toggle(isOn: Binding(get: { document.showPackageContents }, set: { document.showPackageContents = $0 })) {
+                    Label("Show Package Contents",
+                          systemImage: document.showPackageContents ? "shippingbox.and.arrow.backward" : "shippingbox")
+                }
+            }
+            ToolbarItem(id: "RevealInFinder", showsByDefault: false) {
+                Button("Reveal in Finder", systemImage: "finder") { document.selection.map(document.reveal) }
+                    .disabled(document.selection?.special != nil || document.selection == nil)
+            }
+            ToolbarItem(id: "RefreshSelection", showsByDefault: false) {
+                Button("Refresh Selection", systemImage: "arrow.clockwise") { document.selection.map(document.refresh) }
+                    .disabled(document.selection == nil)
+            }
+            ToolbarItem(id: "RefreshAll", showsByDefault: false) {
+                Button("Refresh All", systemImage: "arrow.triangle.2.circlepath") { document.refreshAll() }
+            }
+            ToolbarItem(id: "MoveToTrash", showsByDefault: false) {
+                Button("Move to Trash", systemImage: "trash") { document.selection.map(document.moveToTrash) }
+                    .disabled(document.selection?.parent == nil)
+            }
         }
         ToolbarItem(id: "flexible") { Spacer() }
         ToolbarItem(id: "Cleanup") {
