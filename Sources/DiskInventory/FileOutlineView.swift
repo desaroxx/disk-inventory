@@ -2,13 +2,18 @@ import AppKit
 import DiskInventoryCore
 import SwiftUI
 
-/// NSOutlineView wrapper. SwiftUI's OutlineGroup becomes unusable with hundreds of thousands of rows;
-/// NSOutlineView loads children lazily and recycles row views.
+/// The files view (spec §2): an outline with Name and Size columns, children largest first.
+/// NSOutlineView rather than SwiftUI because it loads rows lazily and copes with millions of items.
 struct FileOutlineView: NSViewRepresentable {
-    let root: FileNode
-    @Binding var selection: FileNode?
+    let document: DocumentModel
+    // Passed explicitly so SwiftUI calls updateNSView when they change.
+    let treeVersion: Int
+    let selection: FileNode?
+    let showPackageContents: Bool
+    let sizeMode: SizeMode
+    let smallFont: Bool
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeCoordinator() -> Coordinator { Coordinator(document: document) }
 
     func makeNSView(context: Context) -> NSScrollView {
         let outline = NSOutlineView()
@@ -16,60 +21,92 @@ struct FileOutlineView: NSViewRepresentable {
         outline.usesAlternatingRowBackgroundColors = true
         outline.style = .fullWidth
         outline.allowsMultipleSelection = false
+        outline.autosaveName = "FilesView"
+        outline.autosaveTableColumns = true
+        outline.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
 
-        for (id, title, width) in [("name", "Name", 220.0), ("size", "Size", 80.0), ("files", "Files", 70.0)] {
-            let column = NSTableColumn(identifier: .init(id))
-            column.title = title
-            column.width = width
-            if id != "name" { column.headerCell.alignment = .right }
-            outline.addTableColumn(column)
-            if id == "name" { outline.outlineTableColumn = column }
-        }
+        let name = NSTableColumn(identifier: .init("displayName"))
+        name.title = "Name"
+        name.width = 181
+        name.minWidth = 16
+        let size = NSTableColumn(identifier: .init("size"))
+        size.title = "Size"
+        size.width = 72
+        size.minWidth = 40
+        size.headerCell.alignment = .right
+        outline.addTableColumn(name)
+        outline.addTableColumn(size)
+        outline.outlineTableColumn = name
 
-        outline.dataSource = context.coordinator
-        outline.delegate = context.coordinator
-        context.coordinator.outline = outline
+        let coordinator = context.coordinator
+        outline.dataSource = coordinator
+        outline.delegate = coordinator
+        outline.menu = NSMenu()
+        outline.menu?.delegate = coordinator
+        coordinator.outline = outline
 
         let scroll = NSScrollView()
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
         scroll.autohidesScrollers = true
-        outline.reloadData()
-        outline.expandItem(root)
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        let coordinator = context.coordinator
-        let rootChanged = coordinator.parent.root !== root
-        coordinator.parent = self
-        guard let outline = coordinator.outline else { return }
-        if rootChanged {
-            outline.reloadData()
-            outline.expandItem(root)
-        }
-        coordinator.reveal(selection)
+        context.coordinator.update(self)
     }
 
     @MainActor
-    final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
-        var parent: FileOutlineView
+    final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
+        let document: DocumentModel
         weak var outline: NSOutlineView?
+        private var shown: (tree: Int, packages: Bool, mode: SizeMode, small: Bool)?
         private var isRevealing = false
 
-        init(_ parent: FileOutlineView) { self.parent = parent }
+        init(document: DocumentModel) { self.document = document }
+
+        func update(_ view: FileOutlineView) {
+            guard let outline else { return }
+            let next = (view.treeVersion, view.showPackageContents, view.sizeMode, view.smallFont)
+            if shown.map({ $0 != next }) ?? true {
+                let expanded = expandedPaths()
+                outline.rowHeight = view.smallFont ? 14 : 17
+                outline.reloadData()
+                if let root = document.root {
+                    outline.expandItem(root)
+                    for names in expanded {
+                        root.descendant(atNames: names).map { outline.expandItem($0) }
+                    }
+                }
+                shown = next
+            }
+            reveal(view.selection)
+        }
+
+        private func expandedPaths() -> [[String]] {
+            guard let outline else { return [] }
+            return (0..<outline.numberOfRows).compactMap { row in
+                guard let node = outline.item(atRow: row) as? FileNode, outline.isItemExpanded(node) else { return nil }
+                return node.namesFromRoot
+            }
+        }
 
         /// Expands ancestors of `node` and selects its row, so a click in the treemap shows up here.
         func reveal(_ node: FileNode?) {
             guard let outline else { return }
-            guard let node else { outline.deselectAll(nil); return }
-            if outline.item(atRow: outline.selectedRow) as? FileNode === node { return }
-            guard let path = parent.root.path(to: node) else { return }
-
             isRevealing = true
             defer { isRevealing = false }
-            for ancestor in path.dropLast() { outline.expandItem(ancestor) }
-            let row = outline.row(forItem: node)
+            guard let node, let root = document.root, let path = root.path(to: node) else {
+                outline.deselectAll(nil)
+                return
+            }
+            if outline.item(atRow: outline.selectedRow) as? FileNode === node { return }
+            // A node inside a hidden package has no row; select the package instead.
+            let visible = path.firstIndex { $0 !== root && $0.isLeaf(showPackageContents: document.showPackageContents) }
+                .map { path[$0] } ?? node
+            for ancestor in path where ancestor !== visible { outline.expandItem(ancestor) }
+            let row = outline.row(forItem: visible)
             if row >= 0 {
                 outline.selectRowIndexes([row], byExtendingSelection: false)
                 outline.scrollRowToVisible(row)
@@ -79,17 +116,17 @@ struct FileOutlineView: NSViewRepresentable {
         // MARK: Data source
 
         func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
-            guard let node = item as? FileNode else { return 1 }
-            return node.children.count
+            guard let node = item as? FileNode else { return document.root == nil ? 0 : 1 }
+            return document.visibleChildren(of: node).count
         }
 
         func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
-            guard let node = item as? FileNode else { return parent.root }
-            return node.children[index]
+            guard let node = item as? FileNode else { return document.root! }
+            return document.visibleChildren(of: node)[index]
         }
 
         func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-            (item as? FileNode).map { !$0.children.isEmpty } ?? false
+            (item as? FileNode).map { !document.visibleChildren(of: $0).isEmpty } ?? false
         }
 
         // MARK: Delegate
@@ -98,15 +135,17 @@ struct FileOutlineView: NSViewRepresentable {
             guard let node = item as? FileNode, let column = tableColumn else { return nil }
             let id = column.identifier
             let cell = outlineView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView ?? makeCell(id)
+            let fontSize = outlineView.rowHeight < 17 ? NSFont.smallSystemFontSize : NSFont.systemFontSize
+            cell.textField?.font = id.rawValue == "size"
+                ? .monospacedDigitSystemFont(ofSize: fontSize, weight: .regular) : .systemFont(ofSize: fontSize)
 
-            switch id.rawValue {
-            case "name":
+            if id.rawValue == "displayName" {
                 cell.textField?.stringValue = node.name
-                cell.imageView?.image = NSImage(systemSymbolName: icon(for: node), accessibilityDescription: nil)
-            case "size":
-                cell.textField?.stringValue = Format.bytes(node.size)
-            default:
-                cell.textField?.stringValue = node.isDirectory ? Format.count(node.fileCount) : ""
+                let icon = NSWorkspace.shared.icon(forFile: node.url.path)
+                icon.size = NSSize(width: 16, height: 16)
+                cell.imageView?.image = icon
+            } else {
+                cell.textField?.stringValue = Format.bytes(node.size(document.sizeMode))
             }
             return cell
         }
@@ -114,7 +153,20 @@ struct FileOutlineView: NSViewRepresentable {
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard !isRevealing, let outline else { return }
             let node = outline.item(atRow: outline.selectedRow) as? FileNode
-            if parent.selection !== node { parent.selection = node }
+            if document.selection !== node { document.selection = node }
+        }
+
+        // MARK: Context menu
+
+        func menuNeedsUpdate(_ menu: NSMenu) {
+            menu.removeAllItems()
+            guard let outline, outline.clickedRow >= 0,
+                  let node = outline.item(atRow: outline.clickedRow) as? FileNode else { return }
+            document.selection = node
+            for item in MenuBuilder.nsMenu(document.actions(for: node)).items {
+                item.menu?.removeItem(item)
+                menu.addItem(item)
+            }
         }
 
         private func makeCell(_ id: NSUserInterfaceItemIdentifier) -> NSTableCellView {
@@ -126,7 +178,7 @@ struct FileOutlineView: NSViewRepresentable {
             cell.addSubview(text)
             cell.textField = text
 
-            if id.rawValue == "name" {
+            if id.rawValue == "displayName" {
                 let image = NSImageView()
                 image.translatesAutoresizingMaskIntoConstraints = false
                 cell.addSubview(image)
@@ -135,11 +187,12 @@ struct FileOutlineView: NSViewRepresentable {
                     image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
                     image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                     image.widthAnchor.constraint(equalToConstant: 16),
+                    image.heightAnchor.constraint(equalToConstant: 16),
                     text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 4),
                 ])
             } else {
                 text.alignment = .right
-                text.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+                text.lineBreakMode = .byClipping
                 text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2).isActive = true
             }
             NSLayoutConstraint.activate([
@@ -147,14 +200,6 @@ struct FileOutlineView: NSViewRepresentable {
                 text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             ])
             return cell
-        }
-
-        private func icon(for node: FileNode) -> String {
-            switch node.kind {
-            case .directory: "folder"
-            case .symlink: "arrow.up.right.square"
-            case .file, .other: "doc"
-            }
         }
     }
 }
