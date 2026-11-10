@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key><string>en</string>
+	<key>CFBundleExecutable</key><string>DiskInventory</string>
+	<key>CFBundleIconFile</key><string>AppIcon</string>
+	<key>CFBundleIdentifier</key><string>io.github.desaroxx.DiskInventory</string>
+	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+	<key>CFBundleName</key><string>DiskInventory</string>
+	<key>CFBundleDisplayName</key><string>DiskInventory</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>__VERSION__</string>
+	<key>CFBundleVersion</key><string>__BUILD__</string>
+	<key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+	<key>LSMinimumSystemVersion</key><string>15.0</string>
+	<key>NSHighResolutionCapable</key><true/>
+	<key>NSPrincipalClass</key><string>NSApplication</string>
+	<key>NSHumanReadableCopyright</key><string>© 2026 Ken Steiner. MIT License. Inspired by Disk Inventory X by Tjark Derlien.</string>
+	<key>NSDesktopFolderUsageDescription</key><string>DiskInventory measures the files in your Desktop folder to show what uses disk space.</string>
+	<key>NSDocumentsFolderUsageDescription</key><string>DiskInventory measures the files in your Documents folder to show what uses disk space.</string>
+	<key>NSDownloadsFolderUsageDescription</key><string>DiskInventory measures the files in your Downloads folder to show what uses disk space.</string>
+	<key>NSRemovableVolumesUsageDescription</key><string>DiskInventory measures the files on removable volumes to show what uses disk space.</string>
+	<key>NSNetworkVolumesUsageDescription</key><string>DiskInventory measures the files on network volumes to show what uses disk space.</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key><string>Folder</string>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+			<key>LSHandlerRank</key><string>None</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.folder</string>
+				<string>public.volume</string>
+				<string>com.apple.application-bundle</string>
+				<string>com.apple.plugin</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

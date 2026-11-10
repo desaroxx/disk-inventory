@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Test
+        run: swift test
+
+      - name: Build app, DMG and zip
+        run: VERSION="${GITHUB_REF_NAME#v}" scripts/build-app.sh
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v v="$VERSION" '/^## /{p = index($0, "## " v) == 1; next} p' CHANGELOG.md > notes.md
+          cat >> notes.md <<'NOTES'
+
+          ### Install
+
+          1. Download the DMG below, open it and drag **DiskInventory** to Applications.
+          2. The app is not notarized yet. On first launch, right-click it and choose **Open**,
+             or allow it in **System Settings ▸ Privacy & Security**.
+          3. To scan protected folders such as `~/Library`, grant DiskInventory Full Disk Access
+             in **System Settings ▸ Privacy & Security ▸ Full Disk Access**.
+          NOTES
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            --title "DiskInventory $VERSION" \
+            --notes-file notes.md \
+            dist/DiskInventory-"$VERSION".dmg \
+            dist/DiskInventory-"$VERSION".zip \
+            dist/SHA256SUMS.txt

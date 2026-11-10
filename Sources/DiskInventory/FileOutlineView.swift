@@ -16,7 +16,7 @@ struct FileOutlineView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(document: document) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let outline = NSOutlineView()
+        let outline = ClippingOutlineView()
         outline.headerView = NSTableHeaderView()
         outline.usesAlternatingRowBackgroundColors = true
         outline.style = .fullWidth
@@ -172,8 +172,10 @@ struct FileOutlineView: NSViewRepresentable {
         private func makeCell(_ id: NSUserInterfaceItemIdentifier) -> NSTableCellView {
             let cell = NSTableCellView()
             cell.identifier = id
+            cell.clipsToBounds = true
             let text = NSTextField(labelWithString: "")
             text.lineBreakMode = .byTruncatingMiddle
+            text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             text.translatesAutoresizingMaskIntoConstraints = false
             cell.addSubview(text)
             cell.textField = text
@@ -201,5 +203,17 @@ struct FileOutlineView: NSViewRepresentable {
             ])
             return cell
         }
+    }
+}
+
+/// Deep rows are indented past the Name column's width, and NSOutlineView then lets their cell
+/// run into the Size column. Keep every cell inside its own column.
+final class ClippingOutlineView: NSOutlineView {
+    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
+        let frame = super.frameOfCell(atColumn: column, row: row)
+        guard column >= 0, column < numberOfColumns else { return frame }
+        let columnRect = rect(ofColumn: column)
+        let minX = min(frame.minX, columnRect.maxX)
+        return NSRect(x: minX, y: frame.minY, width: max(0, min(frame.maxX, columnRect.maxX) - minX), height: frame.height)
     }
 }
